@@ -1,0 +1,141 @@
+import pydotplus
+import pandas as pd
+from sklearn.externals.six import StringIO
+from sklearn.model_selection import StratifiedKFold
+from sklearn.tree import DecisionTreeClassifier, export_graphviz
+
+from SpikeCTree import SpikeCTree
+
+
+def encodeTarget(df, targetColumn):
+    df_mod = df.copy()
+    targets = df_mod[targetColumn].unique()
+    map_to_int = {name: n for n, name in enumerate(targets)}
+    df_mod["Target"] = df_mod[targetColumn].replace(map_to_int)
+
+    return df_mod, targets
+
+#data prep start of hazelnuts transposing and encoding target
+f = open("2602567.txt", "r")
+
+sample_idString = f.readline()
+lengthString = f.readline()
+widthString = f.readline()
+thicknessString = f.readline()
+surface_areaString = f.readline()
+massString = f.readline()
+compactnessString = f.readline()
+hardnessString = f.readline()
+shell_top_radiusString = f.readline()
+water_contentString = f.readline()
+carbohydrate_contentString = f.readline()
+varietyString = f.readline()
+
+sample_id = sample_idString.rstrip().split("\t")
+length = lengthString.rstrip().split("\t")
+width = widthString.rstrip().split("\t")
+thickness = thicknessString.rstrip().split("\t")
+surface_area = surface_areaString.rstrip().split("\t")
+mass = massString.rstrip().split("\t")
+compactness = compactnessString.rstrip().split("\t")
+hardness = hardnessString.rstrip().split("\t")
+shell_top_radius = shell_top_radiusString.rstrip().split("\t")
+water_content = water_contentString.rstrip().split("\t")
+carbohydrate_content = carbohydrate_contentString.rstrip().split("\t")
+variety = varietyString.rstrip().split("\t")
+
+csvOut = 'sample_id,length,width,thickness,surface_area,mass,compactness,hardness,shell_top_radius,water_content,carbohydrate_content,variety\n';
+
+for i in range(len(sample_id)):
+    csvOut += sample_id[i] + ',' + length[i] + ',' + width[i] + ',' + \
+              thickness[i] + ',' + surface_area[i] + ',' + mass[i] + ',' + compactness[i] \
+              + ',' + hardness[i] + ',' + shell_top_radius[i] + ',' + water_content[i] \
+              + ',' + carbohydrate_content[i] + ',' + variety[i] + '\n'
+
+fNew = open('newCsv.csv', 'w+')
+
+fNew.write(csvOut)
+
+# c_americana, c_cornuta or c_avellana
+
+trainData = pd.read_csv("newCsv.csv")
+print(trainData.shape)
+
+df2, targets = encodeTarget(trainData, "variety")
+
+featuresToTest = list(df2.columns[1:11])
+
+print(featuresToTest)
+
+y = df2["Target"]
+x = df2[featuresToTest]
+#Data prepared
+
+#splitting hold out set and kfold model selection for tree fit/test
+bestSpikeScoreTree = SpikeCTree()
+bestSpikeScore = 0
+bestDTCScoreTree = DecisionTreeClassifier()
+bestDTCScore = 0
+
+bestSpikeScores = []
+bestDTCScores = []
+
+skfHoldOutSet = StratifiedKFold(n_splits=3, shuffle=True)
+#taking 2:1 split
+trainingSet, holdOutSet = skfHoldOutSet.split(x, y).__next__()
+print(str.format("Training set to Hold out set ratio {}:{}", len(trainingSet), len(holdOutSet)))
+
+xTrainingSet = x.loc[trainingSet]
+yTrainingSet = y.loc[trainingSet]
+
+xHoldSet = x.loc[holdOutSet]
+yHoldSet = y.loc[holdOutSet]
+
+skfCrossValFolds = StratifiedKFold(n_splits=10, shuffle=True)
+
+print("[0] -> Information Gain\n[1] -> Gain Ratio\n[2] -> Balance Adjusted Information Gain\n")
+attributeSplitMetric = int(input("Enter number choice for Splitting metric of SpikeCTree:"))
+depthLimit = int(input("Choose depth limit:"))
+splitmetric = ["", "gainratio", "setsplit"]
+
+#10-fold cross val keeping best resultant tree
+for trainInd, testInd in skfCrossValFolds.split(xTrainingSet, yTrainingSet):
+    xTrain = x.loc[trainInd]
+    xTest = x.loc[testInd]
+    yTrain = y.loc[trainInd]
+    yTest = y.loc[testInd]
+
+    foldTree = SpikeCTree(depthLimit, splitmetric[attributeSplitMetric])
+    foldTree.fit(xTrain, yTrain)
+    score = foldTree.score(xTest, yTest)
+    bestSpikeScores.append(score)
+
+    oldTree = DecisionTreeClassifier(criterion='entropy', max_depth=depthLimit)
+    oldTree = oldTree.fit(xTrain, yTrain)
+    bestDTCScores.append(oldTree.score(xTest, yTest))
+
+    if score > bestSpikeScore:
+        bestSpikeScore = score
+        bestSpikeScoreTree = foldTree
+        bestDTCScoreTree = oldTree
+
+for spikeT, dtScore in list(zip(bestSpikeScores, bestDTCScores)):
+    print("SpikeCTree:\t", spikeT, "\tCART:\t", dtScore)
+
+graphF = StringIO()
+export_graphviz(bestDTCScoreTree, out_file=graphF, feature_names=featuresToTest)
+pydotplus.graph_from_dot_data(graphF.getvalue()).write_png("CART.png")
+
+dotDiagram = bestSpikeScoreTree.makeDotDiagram()
+dotDiagram.write_png('bestSpikeScoreTree.png')
+
+
+print("Final Test:")
+print("SpikeCTree:\t", bestSpikeScoreTree.score(xHoldSet, yHoldSet), "\tCART:\t", bestDTCScoreTree.score(xHoldSet, yHoldSet))
+spikeCTreePredictions = bestSpikeScoreTree.predict(xHoldSet)
+dTCScoreTreePredictions = bestDTCScoreTree.predict(xHoldSet)
+xHoldSet["Prediction SpikeCTree"] = spikeCTreePredictions
+xHoldSet["Prediction CART"] = dTCScoreTreePredictions
+xHoldSet["Target"] = yHoldSet
+
+xHoldSet.to_csv("ResultsCsv.csv")
