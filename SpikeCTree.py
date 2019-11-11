@@ -53,7 +53,7 @@ class DTreeNode:
                 self.leftX.loc[len(self.leftX), :] = xtrainArr[index]
                 self.leftY.append(target)
             else:
-                self.rightX.loc[len(self.leftX), :] = xtrainArr[index]
+                self.rightX.loc[len(self.rightX), :] = xtrainArr[index]
                 self.rightY.append(target)
             index += 1
 
@@ -76,10 +76,13 @@ class SpikeCTree:
         #rules to apply for information gain / where to split split calculation
         self.balancerSelected = balancerSelected
 
+        self.leafnodeids = 0
+
     #same api as decision tree classifier
     def fit(self, x, y):
         self.root = self.buildtree(x, y)
-        return
+        return self.root
+
 
     #contained recursive method returning root node once all leaves have been defined
     def buildtree(self, xtrain, ytrain, depthCount = 0):
@@ -229,13 +232,15 @@ class SpikeCTree:
             nodeLeft = pydot.Node(str.format("Attribute\t{}\nThreshold\t{:.2f}\nInfo Gain\t{:.2f}", node.left.attributeToTest, node.left.thresholdValue, node.left.infoGain, shape="square"))
             self.makeDotDiagram(node.left, dotGraph, nodeLeft)
         else:
-            nodeLeft = pydot.Node(str.format("Left\nLabel\t{}\nValues\t{}", node.left.label, node.left.ytrainDist, shape="square"))
+            nodeLeft = pydot.Node(str.format("{}", self.leafnodeids), label=str.format("Left\nLabel\t{}\nValues\t{}", node.left.label, node.left.ytrainDist, shape="square"))
+            self.leafnodeids += 1
 
         if(not node.right.isLeaf):
             nodeRight = pydot.Node(str.format("Attribute\t{}\nThreshold\t{:.2f}\nInfo Gain\t{:.2f}", node.right.attributeToTest, node.right.thresholdValue, node.right.infoGain, shape="square"))
             self.makeDotDiagram(node.right, dotGraph, nodeRight)
         else:
-            nodeRight = pydot.Node(str.format("Right\nLabel\t{}\nValues\t{}", node.right.label, node.right.ytrainDist, shape="square"))
+            nodeRight = pydot.Node(str.format("{}", self.leafnodeids), label=str.format("Right\nLabel\t{}\nValues\t{}", node.right.label, node.right.ytrainDist, shape="square"))
+            self.leafnodeids += 1
 
         dotGraph.add_node(nodeLeft)
         dotGraph.add_node(nodeRight)
